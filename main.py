@@ -6,7 +6,7 @@ import time
 # --- Configuration ---
 AWS_REGION = 'us-east-1'
 S3_BUCKET = 'your-s3-bucket-name'
-USER_ID = 'your_user_id'  # Replace with the user_id you want to process
+PREFIX = 'your_s3_prefix'  # Replace with the s3 folder prefix you want to process
 PRESIGNED_URL_EXPIRATION = 3600  # seconds
 
 DROPBOX_ACCESS_TOKEN = 'your_dropbox_access_token'
@@ -14,12 +14,12 @@ DROPBOX_ACCESS_TOKEN = 'your_dropbox_access_token'
 # --- AWS S3 Client ---
 s3_client = boto3.client('s3', region_name=AWS_REGION)
 
-def list_source_objects(user_id):
+def list_source_objects(prefix):
     """
     List all objects in the S3 bucket for a given prefix.
-    Expected key format: {user_id}/{object_id}/{label}/default/file
+    Expected key format: {prefix}/...
     """
-    prefix = f"{user_id}/"
+    prefix = f"{prefix}/"
     paginator = s3_client.get_paginator('list_objects_v2')
     page_iterator = paginator.paginate(Bucket=S3_BUCKET, Prefix=prefix)
     
@@ -92,13 +92,13 @@ def save_files_to_dropbox(dbx, dropbox_folder, urls):
             print(f"Error saving file {dropbox_destination}: {err}")
 
 def main():
-    # List S3 objects for the given user_id with label "source"
-    source_keys = list_source_objects(USER_ID)
+    # List S3 objects for the given prefix
+    source_keys = list_source_objects(PREFIX)
     if not source_keys:
         print("No matching source objects found.")
         return
 
-    print(f"Found {len(source_keys)} source object(s) for user_id {USER_ID}.")
+    print(f"Found {len(source_keys)} source object(s) for prefix {PREFIX}.")
     
     # Generate pre-signed URLs for the objects
     presigned_urls = generate_presigned_urls(source_keys)
