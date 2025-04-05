@@ -2,6 +2,7 @@ import boto3
 import dropbox
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- Configuration ---
 AWS_REGION = 'us-east-1'
@@ -64,32 +65,39 @@ def create_dropbox_folder(dbx):
 
 def save_files_to_dropbox(dbx, dropbox_folder, urls):
     """
-    For each pre-signed URL, use Dropbox API to save the file into the dropbox folder.
+    For each pre-signed URL, use Dropbox API to save the file into the Dropbox folder.
+    Parallelize the Dropbox API calls, limiting to 20 concurrent tasks.
     """
-    # Todo: parallelize this
-    for key, url in urls.items():
-        # Use the S3 object key's last segment as the file name (or customize as needed)
-        file_name = key.split('/')[-1]
+    def save_file(key, url):
+        """
+        Save a single file to Dropbox and poll for its status.
+        """
+        parts = key.split('/')
+        file_name = parts[-1]
         dropbox_destination = f"{dropbox_folder}/{file_name}"
         try:
-            # files_save_url starts the asynchronous saving process
             result = dbx.files_save_url(dropbox_destination, url)
             print(f"Initiated saving file to {dropbox_destination}: {result}")
             
-            # Optionally: wait until the asynchronous job is finished.
-            # Poll for job status if needed:
-            async_job_id = result.async_job_id
-            # Wait until the job is complete (polling every 2 seconds, max 30 seconds)
-            for _ in range(15):
+            async_job_id = result.get_async_job_id()
+            for _ in range(1800):  # Poll every 2 seconds, max 1 hour
                 status = dbx.files_save_url_check_job_status(async_job_id)
                 if status.is_complete():
-                    print(f"File saved: {dropbox_destination}")
-                    break
+                    return f"Success: {dropbox_destination}"
                 time.sleep(2)
-            else:
-                print(f"Timed out waiting for file {dropbox_destination} to save.")
+            return f"Timeout: {dropbox_destination}"
         except dropbox.exceptions.ApiError as err:
-            print(f"Error saving file {dropbox_destination}: {err}")
+            return f"Error saving file {dropbox_destination}: {err}"
+
+    # Use ThreadPoolExecutor to parallelize the API calls
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        future_to_key = {executor.submit(save_file, key, url): key for key, url in urls.items()}
+        for future in as_completed(future_to_key):
+            try:
+                result = future.result()
+                print(result)
+            except Exception as e:
+                print(f"Error processing file {future_to_key[future]}: {e}")
 
 def main():
     # List S3 objects for the given prefix
